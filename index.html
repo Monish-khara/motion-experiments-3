@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fractal Tree — Hue Cycle</title>
+  <title>Fractal Tree — 3D Hue Cycle</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -19,8 +19,6 @@
       image-rendering: crisp-edges;
       max-width: 100vw;
       max-height: 100vh;
-      width: auto;
-      height: auto;
     }
   </style>
 </head>
@@ -37,130 +35,153 @@
     const PX = 4;
     const HUE_SPEED = 0.55;
     const DEPTH_HUE = 20;
+    const ROT_SPEED = 0.018;
+    const CAM_DIST = 900;
+    const FOV = 870;
 
-    const rng = (() => {
-      let s = 999;
+    function makeRng(seed) {
+      let s = seed;
       return () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-    })();
-
-    const segments = [];
-    const particles = [];
-
-    function buildTree() {
-      segments.length = 0;
-      particles.length = 0;
-
-      const cx = SIZE / 2;
-      const baseY = SIZE * 0.80;
-      const forkY = SIZE * 0.68;
-
-      segments.push({ x1: cx - 6, y1: baseY, x2: cx - 20, y2: forkY, depth: 0 });
-      segments.push({ x1: cx + 6, y1: baseY, x2: cx + 20, y2: forkY, depth: 0 });
-
-      const L = 150;
-
-      branch(cx - 20, forkY, -Math.PI * 0.73, L, 1);
-      branch(cx + 20, forkY, -Math.PI * 0.27, L, 1);
-
-      branch(cx - 12, forkY, -Math.PI * 0.58, L * 0.92, 1);
-      branch(cx + 12, forkY, -Math.PI * 0.42, L * 0.92, 1);
-
-      branch(cx, forkY - 8, -Math.PI * 0.5, L * 0.55, 2);
     }
 
-    function branch(x, y, angle, len, depth) {
-      if (depth > 11 || len < 2.5) return;
+    const rng = makeRng(42);
+    const segs = [];
 
-      const ex = x + Math.cos(angle) * len;
-      const ey = y + Math.sin(angle) * len;
-      segments.push({ x1: x, y1: y, x2: ex, y2: ey, depth });
+    function n3(v) {
+      const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+      return l > 0 ? [v[0]/l,v[1]/l,v[2]/l] : [0,-1,0];
+    }
 
-      if (depth >= 8) {
-        for (let p = 0; p < 2; p++) {
-          if (rng() < 0.5) {
-            particles.push({
-              x: ex + (rng() - 0.5) * 30,
-              y: ey + (rng() - 0.5) * 20,
-              depth
-            });
-          }
-        }
-      }
+    function cross(a,b) {
+      return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    }
 
-      const shrink = 0.59 + rng() * 0.11;
-      const nextLen = len * shrink;
+    function deflect(dir, spread, az) {
+      const up = Math.abs(dir[1]) < 0.95 ? [0,-1,0] : [1,0,0];
+      const r = n3(cross(dir, up));
+      const f = n3(cross(r, dir));
+      const sa=Math.sin(spread), ca=Math.cos(spread);
+      const saz=Math.sin(az), caz=Math.cos(az);
+      return n3([
+        dir[0]*ca + r[0]*sa*caz + f[0]*sa*saz,
+        dir[1]*ca + r[1]*sa*caz + f[1]*sa*saz,
+        dir[2]*ca + r[2]*sa*caz + f[2]*sa*saz
+      ]);
+    }
 
-      let spread;
-      if (depth <= 2) spread = 0.38 + rng() * 0.12;
-      else if (depth <= 5) spread = 0.32 + rng() * 0.18;
-      else spread = 0.25 + rng() * 0.25;
+    function build() {
+      segs.length = 0;
 
-      const drift = (rng() - 0.5) * 0.1;
+      segs.push({p1:[0,0,0], p2:[-8,-80,5], d:0});
+      segs.push({p1:[0,0,0], p2:[8,-80,-5], d:0});
 
-      branch(ex, ey, angle - spread + drift, nextLen, depth + 1);
-      branch(ex, ey, angle + spread + drift, nextLen, depth + 1);
+      const top = [0,-80,0];
+      const L = 135;
 
-      if (depth > 1 && depth < 6 && rng() < 0.28) {
-        branch(ex, ey, angle + (rng() - 0.5) * 0.5, nextLen * 0.6, depth + 2);
+      const N = 8;
+      for (let i = 0; i < N; i++) {
+        const az = (i / N) * Math.PI * 2 + rng() * 0.3;
+        const elev = -0.4 - rng() * 0.25;
+        const horiz = 0.8 + rng() * 0.15;
+        const dir = n3([Math.cos(az)*horiz, elev, Math.sin(az)*horiz]);
+        const len = L * (0.9 + rng() * 0.2);
+        grow(top, dir, len, 1);
       }
     }
 
-    function pixelLine(x1, y1, x2, y2, color) {
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const steps = Math.max(Math.ceil(dist / PX), 1);
+    function grow(o, dir, len, d) {
+      if (d > 10 || len < 3) return;
 
-      ctx.fillStyle = color;
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const px = Math.round((x1 + dx * t) / PX) * PX;
-        const py = Math.round((y1 + dy * t) / PX) * PX;
-        ctx.fillRect(px, py, PX, PX);
+      const e = [o[0]+dir[0]*len, o[1]+dir[1]*len, o[2]+dir[2]*len];
+      segs.push({p1:[...o], p2:[...e], d});
+
+      const sh = 0.56 + rng() * 0.14;
+      const nl = len * sh;
+
+      const flat = Math.min(d * 0.07, 0.4);
+      const fd = n3([dir[0]*(1+flat), dir[1]*(1-flat*0.6), dir[2]*(1+flat)]);
+
+      const nk = d < 4 ? 2 + (rng()<0.35?1:0) : 2;
+
+      for (let i = 0; i < nk; i++) {
+        let sp;
+        if (d <= 2) sp = 0.4 + rng()*0.15;
+        else if (d <= 5) sp = 0.35 + rng()*0.2;
+        else sp = 0.3 + rng()*0.25;
+
+        const az = (i/nk)*Math.PI*2 + rng()*Math.PI*0.9;
+        grow(e, deflect(fd, sp, az), nl, d+1);
       }
     }
 
-    function hslColor(h, s, l) {
-      h = ((h % 360) + 360) % 360;
-      s /= 100; l /= 100;
-      const c = (1 - Math.abs(2 * l - 1)) * s;
-      const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-      const m = l - c / 2;
-      let r, g, b;
-      if (h < 60) { r = c; g = x; b = 0; }
-      else if (h < 120) { r = x; g = c; b = 0; }
-      else if (h < 180) { r = 0; g = c; b = x; }
-      else if (h < 240) { r = 0; g = x; b = c; }
-      else if (h < 300) { r = x; g = 0; b = c; }
-      else { r = c; g = 0; b = x; }
-      return `rgb(${Math.round((r+m)*255)},${Math.round((g+m)*255)},${Math.round((b+m)*255)})`;
+    function rotY(p, a) {
+      const c=Math.cos(a), s=Math.sin(a);
+      return [p[0]*c+p[2]*s, p[1], -p[0]*s+p[2]*c];
     }
 
-    let hueBase = 0;
+    function proj(p) {
+      const z = p[2]+CAM_DIST;
+      const sc = FOV/z;
+      return [SIZE/2+p[0]*sc, SIZE*0.65+p[1]*sc, z];
+    }
+
+    function pxLine(x1,y1,x2,y2,col) {
+      const dx=x2-x1, dy=y2-y1;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const st=Math.max(Math.ceil(dist/PX),1);
+      ctx.fillStyle=col;
+      for(let i=0;i<=st;i++){
+        const t=i/st;
+        const px=Math.round((x1+dx*t)/PX)*PX;
+        const py=Math.round((y1+dy*t)/PX)*PX;
+        ctx.fillRect(px,py,PX,PX);
+      }
+    }
+
+    function hsl(h,s,l) {
+      h=((h%360)+360)%360; s/=100; l/=100;
+      const c=(1-Math.abs(2*l-1))*s;
+      const x=c*(1-Math.abs((h/60)%2-1));
+      const m=l-c/2;
+      let r,g,b;
+      if(h<60){r=c;g=x;b=0}
+      else if(h<120){r=x;g=c;b=0}
+      else if(h<180){r=0;g=c;b=x}
+      else if(h<240){r=0;g=x;b=c}
+      else if(h<300){r=x;g=0;b=c}
+      else{r=c;g=0;b=x}
+      return`rgb(${Math.round((r+m)*255)},${Math.round((g+m)*255)},${Math.round((b+m)*255)})`;
+    }
+
+    let hueBase=0, frame=0;
 
     function draw() {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, SIZE, SIZE);
+      frame++;
+      ctx.fillStyle='#000';
+      ctx.fillRect(0,0,SIZE,SIZE);
 
-      for (const seg of segments) {
-        const h = hueBase + seg.depth * DEPTH_HUE;
-        const l = 50 + (seg.depth > 9 ? 5 : 0);
-        pixelLine(seg.x1, seg.y1, seg.x2, seg.y2, hslColor(h, 100, l));
+      const ang = frame * ROT_SPEED;
+      const pr = [];
+
+      for (const s of segs) {
+        const r1=rotY(s.p1,ang), r2=rotY(s.p2,ang);
+        const p1=proj(r1), p2=proj(r2);
+        pr.push({x1:p1[0],y1:p1[1],x2:p2[0],y2:p2[1],z:(p1[2]+p2[2])/2,d:s.d});
       }
 
-      for (const p of particles) {
-        const h = hueBase + p.depth * DEPTH_HUE + 40;
-        ctx.fillStyle = hslColor(h, 100, 52);
-        const px = Math.round(p.x / PX) * PX;
-        const py = Math.round(p.y / PX) * PX;
-        ctx.fillRect(px, py, PX, PX);
+      pr.sort((a,b)=>a.z-b.z);
+
+      for (const s of pr) {
+        const h = hueBase + s.d * DEPTH_HUE;
+        const l = 50 + (s.d>8?5:0);
+        pxLine(s.x1,s.y1,s.x2,s.y2,hsl(h,100,l));
       }
 
       hueBase += HUE_SPEED;
       requestAnimationFrame(draw);
     }
 
-    buildTree();
+    build();
     draw();
   </script>
 </body>
