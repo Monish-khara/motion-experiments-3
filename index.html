@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fractal Tree — Hue Cycle</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      max-width: 100vw;
+      max-height: 100vh;
+      width: auto;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const SIZE = 800;
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+
+    const PX = 4;
+    const HUE_SPEED = 0.55;
+    const DEPTH_HUE = 20;
+
+    const rng = (() => {
+      let s = 999;
+      return () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    })();
+
+    const segments = [];
+    const particles = [];
+
+    function buildTree() {
+      segments.length = 0;
+      particles.length = 0;
+
+      const cx = SIZE / 2;
+      const baseY = SIZE * 0.80;
+      const forkY = SIZE * 0.68;
+
+      segments.push({ x1: cx - 6, y1: baseY, x2: cx - 20, y2: forkY, depth: 0 });
+      segments.push({ x1: cx + 6, y1: baseY, x2: cx + 20, y2: forkY, depth: 0 });
+
+      const L = 150;
+
+      branch(cx - 20, forkY, -Math.PI * 0.73, L, 1);
+      branch(cx + 20, forkY, -Math.PI * 0.27, L, 1);
+
+      branch(cx - 12, forkY, -Math.PI * 0.58, L * 0.92, 1);
+      branch(cx + 12, forkY, -Math.PI * 0.42, L * 0.92, 1);
+
+      branch(cx, forkY - 8, -Math.PI * 0.5, L * 0.55, 2);
+    }
+
+    function branch(x, y, angle, len, depth) {
+      if (depth > 11 || len < 2.5) return;
+
+      const ex = x + Math.cos(angle) * len;
+      const ey = y + Math.sin(angle) * len;
+      segments.push({ x1: x, y1: y, x2: ex, y2: ey, depth });
+
+      if (depth >= 8) {
+        for (let p = 0; p < 2; p++) {
+          if (rng() < 0.5) {
+            particles.push({
+              x: ex + (rng() - 0.5) * 30,
+              y: ey + (rng() - 0.5) * 20,
+              depth
+            });
+          }
+        }
+      }
+
+      const shrink = 0.59 + rng() * 0.11;
+      const nextLen = len * shrink;
+
+      let spread;
+      if (depth <= 2) spread = 0.38 + rng() * 0.12;
+      else if (depth <= 5) spread = 0.32 + rng() * 0.18;
+      else spread = 0.25 + rng() * 0.25;
+
+      const drift = (rng() - 0.5) * 0.1;
+
+      branch(ex, ey, angle - spread + drift, nextLen, depth + 1);
+      branch(ex, ey, angle + spread + drift, nextLen, depth + 1);
+
+      if (depth > 1 && depth < 6 && rng() < 0.28) {
+        branch(ex, ey, angle + (rng() - 0.5) * 0.5, nextLen * 0.6, depth + 2);
+      }
+    }
+
+    function pixelLine(x1, y1, x2, y2, color) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const steps = Math.max(Math.ceil(dist / PX), 1);
+
+      ctx.fillStyle = color;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const px = Math.round((x1 + dx * t) / PX) * PX;
+        const py = Math.round((y1 + dy * t) / PX) * PX;
+        ctx.fillRect(px, py, PX, PX);
+      }
+    }
+
+    function hslColor(h, s, l) {
+      h = ((h % 360) + 360) % 360;
+      s /= 100; l /= 100;
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+      const m = l - c / 2;
+      let r, g, b;
+      if (h < 60) { r = c; g = x; b = 0; }
+      else if (h < 120) { r = x; g = c; b = 0; }
+      else if (h < 180) { r = 0; g = c; b = x; }
+      else if (h < 240) { r = 0; g = x; b = c; }
+      else if (h < 300) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+      return `rgb(${Math.round((r+m)*255)},${Math.round((g+m)*255)},${Math.round((b+m)*255)})`;
+    }
+
+    let hueBase = 0;
+
+    function draw() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, SIZE, SIZE);
+
+      for (const seg of segments) {
+        const h = hueBase + seg.depth * DEPTH_HUE;
+        const l = 50 + (seg.depth > 9 ? 5 : 0);
+        pixelLine(seg.x1, seg.y1, seg.x2, seg.y2, hslColor(h, 100, l));
+      }
+
+      for (const p of particles) {
+        const h = hueBase + p.depth * DEPTH_HUE + 40;
+        ctx.fillStyle = hslColor(h, 100, 52);
+        const px = Math.round(p.x / PX) * PX;
+        const py = Math.round(p.y / PX) * PX;
+        ctx.fillRect(px, py, PX, PX);
+      }
+
+      hueBase += HUE_SPEED;
+      requestAnimationFrame(draw);
+    }
+
+    buildTree();
+    draw();
+  </script>
+</body>
+</html>
