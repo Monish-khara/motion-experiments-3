@@ -38,8 +38,8 @@
     const ROT_SPEED = 0.008;
     const CAM_DIST = 1100;
     const FOV = 870;
-    const MORPH_DURATION = 180;
-    const HOLD_DURATION = 300;
+    const MORPH_DURATION = 60;
+    const HOLD_DURATION = 90;
     const CYCLE = MORPH_DURATION + HOLD_DURATION;
 
     function makeRng(seed) {
@@ -76,7 +76,8 @@
         elev: [-0.4, 0.25], horiz: [0.8, 0.15],
         spread: 0.4, shrink: [0.56, 0.14], flat: 0.07,
         thick: 1.0, droop: 0, maxD: 10,
-        leafSize: 3.0, leafDepth: 6, leafCount: 8
+        leafSize: 3.0, leafDepth: 6, leafCount: 8,
+        roots: { N: 6, L: 90, spread: 0.45, shrink: 0.55, maxD: 8, thick: 0.8 }
       },
       {
         name: 'willow',
@@ -84,7 +85,8 @@
         elev: [-0.35, 0.15], horiz: [0.82, 0.1],
         spread: 0.3, shrink: [0.65, 0.08], flat: 0.04,
         thick: 0.7, droop: 0.07, maxD: 12,
-        leafSize: 1.0, leafDepth: 8, leafCount: 3
+        leafSize: 1.0, leafDepth: 8, leafCount: 3,
+        roots: null
       },
       {
         name: 'baobab',
@@ -92,7 +94,8 @@
         elev: [-0.5, 0.3], horiz: [0.7, 0.2],
         spread: 0.55, shrink: [0.48, 0.16], flat: 0.03,
         thick: 2.8, droop: 0, maxD: 6,
-        leafSize: 5.0, leafDepth: 3, leafCount: 12
+        leafSize: 5.0, leafDepth: 3, leafCount: 12,
+        roots: { N: 4, L: 70, spread: 0.5, shrink: 0.5, maxD: 6, thick: 2.0 }
       },
       {
         name: 'pine',
@@ -100,7 +103,8 @@
         elev: [-0.65, 0.12], horiz: [0.5, 0.12],
         spread: 0.65, shrink: [0.42, 0.18], flat: 0.01,
         thick: 0.4, droop: 0.015, maxD: 7,
-        leafSize: 1.5, leafDepth: 4, leafCount: 5
+        leafSize: 1.5, leafDepth: 4, leafCount: 5,
+        roots: { N: 8, L: 55, spread: 0.35, shrink: 0.52, maxD: 7, thick: 0.3 }
       },
       {
         name: 'cherry',
@@ -108,7 +112,8 @@
         elev: [-0.32, 0.18], horiz: [0.85, 0.1],
         spread: 0.35, shrink: [0.58, 0.12], flat: 0.09,
         thick: 0.8, droop: 0.025, maxD: 10,
-        leafSize: 4.0, leafDepth: 5, leafCount: 14
+        leafSize: 4.0, leafDepth: 5, leafCount: 14,
+        roots: null
       },
       {
         name: 'bonsai',
@@ -116,19 +121,23 @@
         elev: [-0.18, 0.1], horiz: [0.94, 0.04],
         spread: 0.22, shrink: [0.6, 0.1], flat: 0.16,
         thick: 2.0, droop: 0.01, maxD: 8,
-        leafSize: 4.5, leafDepth: 4, leafCount: 10
+        leafSize: 4.5, leafDepth: 4, leafCount: 10,
+        roots: null
       },
     ];
 
     const NUM_SHAPES = shapes.length;
 
+    const ZERO_SEG = {p1:[0,0,0], p2:[0,0,0], d:0, th:0, lf:0};
+
     function buildTree(cfg) {
       const rng = makeRng(cfg.seed);
-      const segs = [];
+      const canopy = [];
+      const roots = [];
 
       const trunkThick = cfg.thick * 3;
-      segs.push({p1:[0,0,0], p2:[-8,-cfg.trunkH,5], d:0, th:trunkThick, lf:0});
-      segs.push({p1:[0,0,0], p2:[8,-cfg.trunkH,-5], d:0, th:trunkThick, lf:0});
+      canopy.push({p1:[0,0,0], p2:[-8,-cfg.trunkH,5], d:0, th:trunkThick, lf:0});
+      canopy.push({p1:[0,0,0], p2:[8,-cfg.trunkH,-5], d:0, th:trunkThick, lf:0});
 
       const top = [0,-cfg.trunkH,0];
 
@@ -138,13 +147,45 @@
         const horiz = cfg.horiz[0] + rng() * cfg.horiz[1];
         const dir = n3([Math.cos(az)*horiz, elev, Math.sin(az)*horiz]);
         const len = cfg.L * (0.9 + rng() * 0.2);
-        grow(segs, rng, cfg, top, dir, len, 1);
+        growCanopy(canopy, rng, cfg, top, dir, len, 1);
       }
 
-      return segs;
+      if (cfg.roots) {
+        const rc = cfg.roots;
+        for (let i = 0; i < rc.N; i++) {
+          const az = (i / rc.N) * Math.PI * 2 + rng() * 0.4;
+          const drop = 0.5 + rng() * 0.35;
+          const horiz = 0.4 + rng() * 0.3;
+          const dir = n3([Math.cos(az)*horiz, drop, Math.sin(az)*horiz]);
+          const len = rc.L * (0.8 + rng() * 0.4);
+          growRoot(roots, rng, rc, [0,0,0], dir, len, 1);
+        }
+      }
+
+      canopy.sort((a,b) => a.d - b.d);
+      roots.sort((a,b) => a.d - b.d);
+
+      return { canopy, roots };
     }
 
-    function grow(segs, rng, cfg, o, dir, len, d) {
+    function growRoot(segs, rng, rc, o, dir, len, d) {
+      if (d > rc.maxD || len < 3) return;
+
+      const e = [o[0]+dir[0]*len, o[1]+dir[1]*len, o[2]+dir[2]*len];
+      const th = rc.thick * Math.pow(0.68, d);
+      segs.push({p1:[...o], p2:[...e], d, th, lf: 0});
+
+      const nl = len * (rc.shrink + (rng()-0.5)*0.12);
+      const nk = d < 3 ? 2 + (rng()<0.3?1:0) : 2;
+
+      for (let i = 0; i < nk; i++) {
+        const sp = rc.spread * (0.6 + rng()*0.8);
+        const az = (i/nk)*Math.PI*2 + rng()*Math.PI;
+        growRoot(segs, rng, rc, e, deflect(dir, sp, az), nl, d+1);
+      }
+    }
+
+    function growCanopy(segs, rng, cfg, o, dir, len, d) {
       if (d > cfg.maxD || len < 3) return;
 
       const droopAmt = cfg.droop * d * d;
@@ -187,27 +228,30 @@
       for (let i = 0; i < nk; i++) {
         const sp = cfg.spread * (0.7 + rng()*0.6);
         const az = (i/nk)*Math.PI*2 + rng()*Math.PI*0.9;
-        grow(segs, rng, cfg, e, deflect(fd, sp, az), nl, d+1);
+        growCanopy(segs, rng, cfg, e, deflect(fd, sp, az), nl, d+1);
       }
     }
 
-    const rawTrees = shapes.map(s => buildTree(s));
+    const built = shapes.map(s => buildTree(s));
 
-    function sortByDepth(segs) {
-      return [...segs].sort((a,b) => a.d - b.d);
+    const maxCanopy = Math.max(...built.map(b => b.canopy.length));
+    const maxRoots = Math.max(...built.map(b => b.roots.length));
+
+    function padArray(arr, target, fallback) {
+      const out = [...arr];
+      while (out.length < target) {
+        out.push({...fallback});
+      }
+      return out;
     }
 
-    const sortedTrees = rawTrees.map(t => sortByDepth(t));
-    const maxSegs = Math.max(...sortedTrees.map(t => t.length));
-
-    const trees = sortedTrees.map(t => {
-      const padded = [...t];
-      while (padded.length < maxSegs) {
-        const src = padded[padded.length - 1];
-        padded.push({ p1:[...src.p2], p2:[...src.p2], d: src.d, th: 0, lf: 0 });
-      }
-      return padded;
+    const trees = built.map(b => {
+      const c = padArray(b.canopy, maxCanopy, ZERO_SEG);
+      const r = padArray(b.roots, maxRoots, ZERO_SEG);
+      return [...c, ...r];
     });
+
+    const maxSegs = maxCanopy + maxRoots;
 
     function smoothstep(t) {
       return t * t * (3 - 2 * t);
