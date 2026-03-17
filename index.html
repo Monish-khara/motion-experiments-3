@@ -38,10 +38,9 @@
     const ROT_SPEED = 0.008;
     const CAM_DIST = 1100;
     const FOV = 870;
-    const MORPH_DURATION = 480;
+    const MORPH_DURATION = 180;
     const HOLD_DURATION = 300;
     const CYCLE = MORPH_DURATION + HOLD_DURATION;
-    const NUM_SHAPES = 6;
 
     function makeRng(seed) {
       let s = seed;
@@ -71,20 +70,65 @@
     }
 
     const shapes = [
-      { seed:42,  N:8,  L:135, trunkH:80, elev:[-0.4,0.25], horiz:[0.8,0.15],  spread:0.4,  shrink:[0.56,0.14], flat:0.07 },
-      { seed:137, N:12, L:95,  trunkH:65, elev:[-0.55,0.25], horiz:[0.65,0.18], spread:0.5,  shrink:[0.52,0.14], flat:0.04 },
-      { seed:271, N:6,  L:155, trunkH:90, elev:[-0.25,0.15], horiz:[0.88,0.08], spread:0.28, shrink:[0.6,0.1],   flat:0.1  },
-      { seed:503, N:10, L:110, trunkH:72, elev:[-0.5,0.2],   horiz:[0.72,0.15], spread:0.45, shrink:[0.5,0.16],  flat:0.06 },
-      { seed:719, N:7,  L:145, trunkH:85, elev:[-0.32,0.18], horiz:[0.84,0.1],  spread:0.32, shrink:[0.58,0.12], flat:0.09 },
-      { seed:997, N:14, L:80,  trunkH:58, elev:[-0.52,0.3],  horiz:[0.68,0.18], spread:0.55, shrink:[0.48,0.18], flat:0.03 },
+      {
+        name: 'oak',
+        seed: 42, N: 8, L: 135, trunkH: 80,
+        elev: [-0.4, 0.25], horiz: [0.8, 0.15],
+        spread: 0.4, shrink: [0.56, 0.14], flat: 0.07,
+        thick: 1.0, droop: 0, maxD: 10,
+        leafSize: 3.0, leafDepth: 6, leafCount: 8
+      },
+      {
+        name: 'willow',
+        seed: 137, N: 7, L: 120, trunkH: 95,
+        elev: [-0.35, 0.15], horiz: [0.82, 0.1],
+        spread: 0.3, shrink: [0.65, 0.08], flat: 0.04,
+        thick: 0.7, droop: 0.07, maxD: 12,
+        leafSize: 1.0, leafDepth: 8, leafCount: 3
+      },
+      {
+        name: 'baobab',
+        seed: 271, N: 5, L: 85, trunkH: 110,
+        elev: [-0.5, 0.3], horiz: [0.7, 0.2],
+        spread: 0.55, shrink: [0.48, 0.16], flat: 0.03,
+        thick: 2.8, droop: 0, maxD: 6,
+        leafSize: 5.0, leafDepth: 3, leafCount: 12
+      },
+      {
+        name: 'pine',
+        seed: 503, N: 16, L: 65, trunkH: 45,
+        elev: [-0.65, 0.12], horiz: [0.5, 0.12],
+        spread: 0.65, shrink: [0.42, 0.18], flat: 0.01,
+        thick: 0.4, droop: 0.015, maxD: 7,
+        leafSize: 1.5, leafDepth: 4, leafCount: 5
+      },
+      {
+        name: 'cherry',
+        seed: 719, N: 6, L: 110, trunkH: 85,
+        elev: [-0.32, 0.18], horiz: [0.85, 0.1],
+        spread: 0.35, shrink: [0.58, 0.12], flat: 0.09,
+        thick: 0.8, droop: 0.025, maxD: 10,
+        leafSize: 4.0, leafDepth: 5, leafCount: 14
+      },
+      {
+        name: 'bonsai',
+        seed: 997, N: 4, L: 140, trunkH: 65,
+        elev: [-0.18, 0.1], horiz: [0.94, 0.04],
+        spread: 0.22, shrink: [0.6, 0.1], flat: 0.16,
+        thick: 2.0, droop: 0.01, maxD: 8,
+        leafSize: 4.5, leafDepth: 4, leafCount: 10
+      },
     ];
+
+    const NUM_SHAPES = shapes.length;
 
     function buildTree(cfg) {
       const rng = makeRng(cfg.seed);
       const segs = [];
 
-      segs.push({p1:[0,0,0], p2:[-8,-cfg.trunkH,5], d:0});
-      segs.push({p1:[0,0,0], p2:[8,-cfg.trunkH,-5], d:0});
+      const trunkThick = cfg.thick * 3;
+      segs.push({p1:[0,0,0], p2:[-8,-cfg.trunkH,5], d:0, th:trunkThick, lf:0});
+      segs.push({p1:[0,0,0], p2:[8,-cfg.trunkH,-5], d:0, th:trunkThick, lf:0});
 
       const top = [0,-cfg.trunkH,0];
 
@@ -101,16 +145,42 @@
     }
 
     function grow(segs, rng, cfg, o, dir, len, d) {
-      if (d > 10 || len < 3) return;
+      if (d > cfg.maxD || len < 3) return;
 
-      const e = [o[0]+dir[0]*len, o[1]+dir[1]*len, o[2]+dir[2]*len];
-      segs.push({p1:[...o], p2:[...e], d});
+      const droopAmt = cfg.droop * d * d;
+      const drooped = n3([dir[0], dir[1] + droopAmt, dir[2]]);
+
+      const e = [o[0]+drooped[0]*len, o[1]+drooped[1]*len, o[2]+drooped[2]*len];
+
+      const thickFalloff = Math.pow(0.7, d);
+      const th = cfg.thick * thickFalloff;
+
+      const isLeafZone = d >= cfg.leafDepth;
+      const leafAmount = isLeafZone ? cfg.leafSize * (1 - (d - cfg.leafDepth) / (cfg.maxD - cfg.leafDepth + 1)) : 0;
+
+      segs.push({p1:[...o], p2:[...e], d, th, lf: leafAmount});
+
+      if (isLeafZone) {
+        const nLeaves = Math.ceil(cfg.leafCount * (0.5 + 0.5 * rng()));
+        const leafR = len * 0.4;
+        for (let j = 0; j < nLeaves; j++) {
+          const t = rng();
+          const bx = o[0] + (e[0]-o[0])*t;
+          const by = o[1] + (e[1]-o[1])*t;
+          const bz = o[2] + (e[2]-o[2])*t;
+          const ox = (rng()-0.5) * leafR * 2;
+          const oy = (rng()-0.5) * leafR * 1.5;
+          const oz = (rng()-0.5) * leafR * 2;
+          const lp = [bx+ox, by+oy, bz+oz];
+          segs.push({p1:[...lp], p2:[lp[0]+(rng()-0.5)*4, lp[1]+(rng()-0.5)*4, lp[2]+(rng()-0.5)*4], d: d+1, th: 0, lf: leafAmount * 1.2});
+        }
+      }
 
       const sh = cfg.shrink[0] + rng() * cfg.shrink[1];
       const nl = len * sh;
 
       const flat = Math.min(d * cfg.flat, 0.4);
-      const fd = n3([dir[0]*(1+flat), dir[1]*(1-flat*0.6), dir[2]*(1+flat)]);
+      const fd = n3([drooped[0]*(1+flat), drooped[1]*(1-flat*0.6), drooped[2]*(1+flat)]);
 
       const nk = d < 4 ? 2 + (rng()<0.35?1:0) : 2;
 
@@ -124,18 +194,17 @@
     const rawTrees = shapes.map(s => buildTree(s));
 
     function sortByDepth(segs) {
-      return [...segs].sort((a,b) => a.d - b.d || 0);
+      return [...segs].sort((a,b) => a.d - b.d);
     }
 
     const sortedTrees = rawTrees.map(t => sortByDepth(t));
-
     const maxSegs = Math.max(...sortedTrees.map(t => t.length));
 
     const trees = sortedTrees.map(t => {
       const padded = [...t];
       while (padded.length < maxSegs) {
         const src = padded[padded.length - 1];
-        padded.push({ p1:[...src.p2], p2:[...src.p2], d: src.d });
+        padded.push({ p1:[...src.p2], p2:[...src.p2], d: src.d, th: 0, lf: 0 });
       }
       return padded;
     });
@@ -144,12 +213,10 @@
       return t * t * (3 - 2 * t);
     }
 
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
     function lerp3(a, b, t) {
-      return [
-        a[0] + (b[0]-a[0]) * t,
-        a[1] + (b[1]-a[1]) * t,
-        a[2] + (b[2]-a[2]) * t
-      ];
+      return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
     }
 
     function rotY(p, a) {
@@ -163,16 +230,30 @@
       return [SIZE/2+p[0]*sc, SIZE*0.65+p[1]*sc, z];
     }
 
-    function pxLine(x1,y1,x2,y2,col) {
+    function pxLine(x1,y1,x2,y2,col,thick) {
       const dx=x2-x1, dy=y2-y1;
       const dist=Math.sqrt(dx*dx+dy*dy);
       const st=Math.max(Math.ceil(dist/PX),1);
+      const sz = Math.max(PX, Math.round(PX * thick));
       ctx.fillStyle=col;
       for(let i=0;i<=st;i++){
         const t=i/st;
         const px=Math.round((x1+dx*t)/PX)*PX;
         const py=Math.round((y1+dy*t)/PX)*PX;
-        ctx.fillRect(px,py,PX,PX);
+        ctx.fillRect(px,py,sz,sz);
+      }
+    }
+
+    function pxBlob(x, y, col, size) {
+      const sz = Math.max(PX, Math.round(PX * size));
+      const half = Math.floor(sz / (2 * PX));
+      ctx.fillStyle = col;
+      for (let dy = -half; dy <= half; dy++) {
+        for (let dx = -half; dx <= half; dx++) {
+          const px = Math.round(x / PX) * PX + dx * PX;
+          const py = Math.round(y / PX) * PX + dy * PX;
+          ctx.fillRect(px, py, PX, PX);
+        }
       }
     }
 
@@ -219,19 +300,33 @@
         const sA = fromTree[i], sB = toTree[i];
         const p1 = lerp3(sA.p1, sB.p1, t);
         const p2 = lerp3(sA.p2, sB.p2, t);
+        const th = lerp(sA.th, sB.th, t);
+        const lf = lerp(sA.lf, sB.lf, t);
         const d = sA.d;
 
         const r1=rotY(p1,ang), r2=rotY(p2,ang);
         const pp1=proj(r1), pp2=proj(r2);
-        pr.push({x1:pp1[0],y1:pp1[1],x2:pp2[0],y2:pp2[1],z:(pp1[2]+pp2[2])/2,d});
+        pr.push({x1:pp1[0],y1:pp1[1],x2:pp2[0],y2:pp2[1],z:(pp1[2]+pp2[2])/2,d,th,lf});
       }
 
       pr.sort((a,b)=>a.z-b.z);
 
       for (const s of pr) {
+        if (s.th < 0.01 && s.lf < 0.01) continue;
         const h = hueBase + s.d * DEPTH_HUE;
         const l = 50 + (s.d>8?5:0);
-        pxLine(s.x1,s.y1,s.x2,s.y2,hsl(h,100,l));
+        const col = hsl(h,100,l);
+
+        if (s.lf > 0.5) {
+          pxBlob(
+            (s.x1+s.x2)/2,
+            (s.y1+s.y2)/2,
+            col, s.lf
+          );
+        }
+        if (s.th > 0.01) {
+          pxLine(s.x1,s.y1,s.x2,s.y2,col,s.th);
+        }
       }
 
       hueBase += HUE_SPEED;
