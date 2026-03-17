@@ -38,14 +38,15 @@
     const ROT_SPEED = 0.008;
     const CAM_DIST = 1100;
     const FOV = 870;
+    const MORPH_DURATION = 480;
+    const HOLD_DURATION = 300;
+    const CYCLE = MORPH_DURATION + HOLD_DURATION;
+    const NUM_SHAPES = 6;
 
     function makeRng(seed) {
       let s = seed;
       return () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
     }
-
-    const rng = makeRng(42);
-    const segs = [];
 
     function n3(v) {
       const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
@@ -69,49 +70,86 @@
       ]);
     }
 
-    function build() {
-      segs.length = 0;
+    const shapes = [
+      { seed:42,  N:8,  L:135, trunkH:80, elev:[-0.4,0.25], horiz:[0.8,0.15],  spread:0.4,  shrink:[0.56,0.14], flat:0.07 },
+      { seed:137, N:12, L:95,  trunkH:65, elev:[-0.55,0.25], horiz:[0.65,0.18], spread:0.5,  shrink:[0.52,0.14], flat:0.04 },
+      { seed:271, N:6,  L:155, trunkH:90, elev:[-0.25,0.15], horiz:[0.88,0.08], spread:0.28, shrink:[0.6,0.1],   flat:0.1  },
+      { seed:503, N:10, L:110, trunkH:72, elev:[-0.5,0.2],   horiz:[0.72,0.15], spread:0.45, shrink:[0.5,0.16],  flat:0.06 },
+      { seed:719, N:7,  L:145, trunkH:85, elev:[-0.32,0.18], horiz:[0.84,0.1],  spread:0.32, shrink:[0.58,0.12], flat:0.09 },
+      { seed:997, N:14, L:80,  trunkH:58, elev:[-0.52,0.3],  horiz:[0.68,0.18], spread:0.55, shrink:[0.48,0.18], flat:0.03 },
+    ];
 
-      segs.push({p1:[0,0,0], p2:[-8,-80,5], d:0});
-      segs.push({p1:[0,0,0], p2:[8,-80,-5], d:0});
+    function buildTree(cfg) {
+      const rng = makeRng(cfg.seed);
+      const segs = [];
 
-      const top = [0,-80,0];
-      const L = 135;
+      segs.push({p1:[0,0,0], p2:[-8,-cfg.trunkH,5], d:0});
+      segs.push({p1:[0,0,0], p2:[8,-cfg.trunkH,-5], d:0});
 
-      const N = 8;
-      for (let i = 0; i < N; i++) {
-        const az = (i / N) * Math.PI * 2 + rng() * 0.3;
-        const elev = -0.4 - rng() * 0.25;
-        const horiz = 0.8 + rng() * 0.15;
+      const top = [0,-cfg.trunkH,0];
+
+      for (let i = 0; i < cfg.N; i++) {
+        const az = (i / cfg.N) * Math.PI * 2 + rng() * 0.3;
+        const elev = cfg.elev[0] - rng() * cfg.elev[1];
+        const horiz = cfg.horiz[0] + rng() * cfg.horiz[1];
         const dir = n3([Math.cos(az)*horiz, elev, Math.sin(az)*horiz]);
-        const len = L * (0.9 + rng() * 0.2);
-        grow(top, dir, len, 1);
+        const len = cfg.L * (0.9 + rng() * 0.2);
+        grow(segs, rng, cfg, top, dir, len, 1);
       }
+
+      return segs;
     }
 
-    function grow(o, dir, len, d) {
+    function grow(segs, rng, cfg, o, dir, len, d) {
       if (d > 10 || len < 3) return;
 
       const e = [o[0]+dir[0]*len, o[1]+dir[1]*len, o[2]+dir[2]*len];
       segs.push({p1:[...o], p2:[...e], d});
 
-      const sh = 0.56 + rng() * 0.14;
+      const sh = cfg.shrink[0] + rng() * cfg.shrink[1];
       const nl = len * sh;
 
-      const flat = Math.min(d * 0.07, 0.4);
+      const flat = Math.min(d * cfg.flat, 0.4);
       const fd = n3([dir[0]*(1+flat), dir[1]*(1-flat*0.6), dir[2]*(1+flat)]);
 
       const nk = d < 4 ? 2 + (rng()<0.35?1:0) : 2;
 
       for (let i = 0; i < nk; i++) {
-        let sp;
-        if (d <= 2) sp = 0.4 + rng()*0.15;
-        else if (d <= 5) sp = 0.35 + rng()*0.2;
-        else sp = 0.3 + rng()*0.25;
-
+        const sp = cfg.spread * (0.7 + rng()*0.6);
         const az = (i/nk)*Math.PI*2 + rng()*Math.PI*0.9;
-        grow(e, deflect(fd, sp, az), nl, d+1);
+        grow(segs, rng, cfg, e, deflect(fd, sp, az), nl, d+1);
       }
+    }
+
+    const rawTrees = shapes.map(s => buildTree(s));
+
+    function sortByDepth(segs) {
+      return [...segs].sort((a,b) => a.d - b.d || 0);
+    }
+
+    const sortedTrees = rawTrees.map(t => sortByDepth(t));
+
+    const maxSegs = Math.max(...sortedTrees.map(t => t.length));
+
+    const trees = sortedTrees.map(t => {
+      const padded = [...t];
+      while (padded.length < maxSegs) {
+        const src = padded[padded.length - 1];
+        padded.push({ p1:[...src.p2], p2:[...src.p2], d: src.d });
+      }
+      return padded;
+    });
+
+    function smoothstep(t) {
+      return t * t * (3 - 2 * t);
+    }
+
+    function lerp3(a, b, t) {
+      return [
+        a[0] + (b[0]-a[0]) * t,
+        a[1] + (b[1]-a[1]) * t,
+        a[2] + (b[2]-a[2]) * t
+      ];
     }
 
     function rotY(p, a) {
@@ -160,13 +198,32 @@
       ctx.fillStyle='#000';
       ctx.fillRect(0,0,SIZE,SIZE);
 
+      const totalFrame = frame % (CYCLE * NUM_SHAPES);
+      const shapeIdx = Math.floor(totalFrame / CYCLE);
+      const withinCycle = totalFrame % CYCLE;
+
+      const fromTree = trees[shapeIdx];
+      const toTree = trees[(shapeIdx + 1) % NUM_SHAPES];
+
+      let t;
+      if (withinCycle < HOLD_DURATION) {
+        t = 0;
+      } else {
+        t = smoothstep((withinCycle - HOLD_DURATION) / MORPH_DURATION);
+      }
+
       const ang = frame * ROT_SPEED;
       const pr = [];
 
-      for (const s of segs) {
-        const r1=rotY(s.p1,ang), r2=rotY(s.p2,ang);
-        const p1=proj(r1), p2=proj(r2);
-        pr.push({x1:p1[0],y1:p1[1],x2:p2[0],y2:p2[1],z:(p1[2]+p2[2])/2,d:s.d});
+      for (let i = 0; i < maxSegs; i++) {
+        const sA = fromTree[i], sB = toTree[i];
+        const p1 = lerp3(sA.p1, sB.p1, t);
+        const p2 = lerp3(sA.p2, sB.p2, t);
+        const d = sA.d;
+
+        const r1=rotY(p1,ang), r2=rotY(p2,ang);
+        const pp1=proj(r1), pp2=proj(r2);
+        pr.push({x1:pp1[0],y1:pp1[1],x2:pp2[0],y2:pp2[1],z:(pp1[2]+pp2[2])/2,d});
       }
 
       pr.sort((a,b)=>a.z-b.z);
@@ -181,7 +238,6 @@
       requestAnimationFrame(draw);
     }
 
-    build();
     draw();
   </script>
 </body>
